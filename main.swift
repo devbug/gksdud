@@ -801,6 +801,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var keyTapSource: CFRunLoopSource?
     var pressGate = PressGate()
     var spaceGate = SpaceComboGate()
+    // A Korean/English key another process posts, held.
+    var softwareGate = SoftwareKeyGate()
     // The F-keys of the sources' keys.
     var sourceKeyGate = PressGate()
     var nativeRemote = NativeRemoteGate()
@@ -891,7 +893,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let source = keyTapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         if let tap = keyTap { CFMachPortInvalidate(tap) }
         releaseHeldKeys()
-        keyTapSource = nil; keyTap = nil; pressGate.held.removeAll(); nativeRemote = NativeRemoteGate(); spaceGate = SpaceComboGate()
+        keyTapSource = nil; keyTap = nil; pressGate.held.removeAll(); nativeRemote = NativeRemoteGate(); spaceGate = SpaceComboGate(); softwareGate.reset()
         sourceKeyGate.held.removeAll(); observedCaps = nil; backquote.reset()
     }
     func ensureKeyTap() {
@@ -919,6 +921,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 }
                 // Keys this app posts again, such as ones held while a switch landed, act only once.
                 let ours = event.getIntegerValueField(.eventSourceUserData) == owner.nativePulseMarker
+                // A Korean/English key another app posts, first so the modifier it strips is gone for all below. Like a
+                // Space combination, it waits in Option input's queue while that is busy.
+                if !ours && !owner.optionInput.busy && (type == .keyDown || type == .keyUp || type == .flagsChanged)
+                    && owner.takeSoftwareKey(event, type: type) { return nil }
                 if !ours && (type == .keyDown || type == .flagsChanged) {
                     owner.spaceGate.note(type: type, code: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags)
                     // Modifier events carry the lock, also a change no key made. A Caps Lock press right after a lock set by

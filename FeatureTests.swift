@@ -1359,4 +1359,69 @@ func runUniversalControlTests() {
     }
     print("PASS: Universal Control long press told from the tap's, other Mac's keys by sending service, its lock followed, compatibility mode")
 }
+
+// A Korean/English key another process posts (Synergy and such), which no HID mapping reaches.
+func runSoftwareKeyTests() {
+    let rightCommand: CGEventFlags = [.maskCommand, CGEventFlags(rawValue: 0x10)]
+    let leftCommand = CGEventFlags(rawValue: 0x08)
+    var gate = SoftwareKeyGate()
+    func handle(_ type: CGEventType, _ code: Int64, _ flags: CGEventFlags, pid: Int64 = 500, chosen: Set<Int64> = [54]) -> SoftwareKeyGate.Decision {
+        gate.handle(type: type, code: code, flags: flags, pid: pid, chosen: chosen)
+    }
+    featureCheck(handle(.flagsChanged, 54, rightCommand, pid: 0) == .pass, "A keyboard's own right Command is the HID mapping's")
+    featureCheck(handle(.flagsChanged, 61, [.maskAlternate, CGEventFlags(rawValue: 0x40)]) == .pass, "A key not chosen passes")
+    featureCheck(handle(.flagsChanged, 54, []) == .pass, "A release never seen pressed reaches the app that saw the press")
+    featureCheck(handle(.flagsChanged, 54, rightCommand) == .press, "A posted right Command switches on press")
+    featureCheck(handle(.flagsChanged, 54, rightCommand) == .consume, "Pressed again while held, it switches once")
+    featureCheck(handle(.keyDown, 7, rightCommand) == .strip([]), "A key typed while it is held is not a Command shortcut")
+    featureCheck(handle(.keyUp, 7, rightCommand.union(.maskShift)) == .strip(.maskShift), "Other modifiers stay")
+    featureCheck(handle(.keyDown, 7, rightCommand.union(leftCommand)) == .strip([.maskCommand, leftCommand]), "Left Command keeps Command")
+    featureCheck(handle(.flagsChanged, 56, rightCommand.union(.maskShift)) == .strip(.maskShift), "Modifier changes drop it too")
+    featureCheck(handle(.keyDown, 7, rightCommand, pid: 600) == .strip([]), "Any poster's flag goes: the press never reached macOS")
+    featureCheck(handle(.keyDown, 7, rightCommand, pid: 0) == .pass, "A keyboard's own events are left alone")
+    featureCheck(handle(.keyDown, 7, [], pid: 600) == .pass && gate.held != nil, "Another poster's events do not end it")
+    featureCheck(handle(.flagsChanged, 54, []) == .release && gate.held == nil, "Its release ends the switch")
+    // A press replayed by Option input comes from this app; the poster's own release still ends it.
+    featureCheck(handle(.flagsChanged, 54, rightCommand, pid: 700) == .press)
+    featureCheck(handle(.flagsChanged, 54, [], pid: 500) == .release && gate.held == nil, "Released by whichever poster sends it")
+    featureCheck(handle(.keyDown, 7, rightCommand) == .pass, "After the release nothing is stripped")
+    // A release lost on the way: the next event without the key's flag releases the F-key and goes on.
+    featureCheck(handle(.flagsChanged, 54, rightCommand) == .press)
+    featureCheck(handle(.keyDown, 7, []) == .lost && gate.held == nil, "An event without its flag means it was released")
+    featureCheck(handle(.flagsChanged, 54, []) == .pass)
+    // Turned off while held, the release still ends what the press began.
+    featureCheck(handle(.flagsChanged, 54, rightCommand) == .press)
+    featureCheck(handle(.flagsChanged, 54, [], chosen: []) == .release && gate.held == nil, "Released after the key stopped being chosen")
+    featureCheck(handle(.flagsChanged, 54, rightCommand) == .press)
+    gate.reset()
+    featureCheck(gate.held == nil && handle(.keyDown, 7, rightCommand) == .pass, "Reset forgets the held key")
+    // Right Option and right Control, by their own device bits.
+    let rightOption: CGEventFlags = [.maskAlternate, CGEventFlags(rawValue: 0x40)]
+    featureCheck(handle(.flagsChanged, 61, rightOption, chosen: [61]) == .press)
+    featureCheck(handle(.keyDown, 7, rightOption.union(CGEventFlags(rawValue: 0x20)), chosen: [61]) == .strip([.maskAlternate, CGEventFlags(rawValue: 0x20)]),
+                 "Left Option keeps Option")
+    featureCheck(handle(.flagsChanged, 61, [], chosen: [61]) == .release)
+    let rightControl: CGEventFlags = [.maskControl, CGEventFlags(rawValue: 0x2000)]
+    featureCheck(handle(.flagsChanged, 62, rightControl, chosen: [62]) == .press)
+    featureCheck(handle(.keyDown, 7, rightControl, chosen: [62]) == .strip([]))
+    featureCheck(handle(.flagsChanged, 62, [], chosen: [62]) == .release)
+    featureCheck(SoftwareKeyGate.keyCode(sources[0]) == 54 && SoftwareKeyGate.keyCode(sources[1]) == 61 && SoftwareKeyGate.keyCode(sources[3]) == 62
+                 && SoftwareKeyGate.keyCode(sources[2]) == nil && SoftwareKeyGate.keyCode(spaceCombos[0]) == nil,
+                 "Right Command, Option and Control; Caps Lock never comes as a key press")
+    let suite = "io.gksdud.software-key-tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let engine = Engine(defaults: defaults, discover: { [] }, shortcutPreferences: ShortcutPreferences(read: { [:] }, write: { _ in }, activate: {}))
+    defaults.set(true, forKey: "active")
+    engine.defaultSources = [sources[0], spaceCombos[0]]
+    featureCheck(engine.softwareKeyCodes == [54], "The chosen single keys, not the Space combinations")
+    engine.defaultSources = [sources[1], sources[2], sources[3]]
+    featureCheck(engine.softwareKeyCodes == [61, 62])
+    engine.paused = true
+    featureCheck(engine.softwareKeyCodes.isEmpty, "Paused, nothing is taken")
+    engine.paused = false
+    defaults.set(false, forKey: "active")
+    featureCheck(engine.softwareKeyCodes.isEmpty, "Inactive, nothing is taken")
+    print("PASS: posted right modifiers switch on press, held flag stripped from the poster's keys, left side kept, missed release, chosen keys only")
+}
 #endif
