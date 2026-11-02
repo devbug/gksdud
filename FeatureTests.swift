@@ -1405,6 +1405,15 @@ func runSoftwareKeyTests() {
     featureCheck(handle(.flagsChanged, 62, rightControl, chosen: [62]) == .press)
     featureCheck(handle(.keyDown, 7, rightControl, chosen: [62]) == .strip([]))
     featureCheck(handle(.flagsChanged, 62, [], chosen: [62]) == .release)
+    // Synergy with its Caps Lock on: the press comes without the device bits, between its own Caps Lock press and release.
+    let capsLock = CGEventFlags.maskAlphaShift
+    featureCheck(handle(.flagsChanged, 57, capsLock) == .pass, "Synergy's Caps Lock press goes on")
+    featureCheck(handle(.flagsChanged, 54, [capsLock, .maskCommand]) == .press, "A press without the device bits still switches")
+    featureCheck(handle(.flagsChanged, 57, rightCommand) == .strip([]), "Its Caps Lock release drops the Command flag")
+    featureCheck(handle(.keyDown, 7, [capsLock, .maskCommand]) == .strip(capsLock), "Without the device bits the flag goes too")
+    featureCheck(handle(.flagsChanged, 54, capsLock) == .release && gate.held == nil, "The release without the device bits ends it")
+    featureCheck(handle(.flagsChanged, 55, [capsLock, .maskCommand]) == .pass && gate.held == nil, "Left Command by its key code, flags or not")
+    featureCheck(handle(.flagsChanged, 54, [capsLock, .maskCommand, leftCommand]) == .pass, "Left Command down, the press is not told apart")
     featureCheck(SoftwareKeyGate.keyCode(sources[0]) == 54 && SoftwareKeyGate.keyCode(sources[1]) == 61 && SoftwareKeyGate.keyCode(sources[3]) == 62
                  && SoftwareKeyGate.keyCode(sources[2]) == nil && SoftwareKeyGate.keyCode(spaceCombos[0]) == nil,
                  "Right Command, Option and Control; Caps Lock never comes as a key press")
@@ -1422,6 +1431,6 @@ func runSoftwareKeyTests() {
     engine.paused = false
     defaults.set(false, forKey: "active")
     featureCheck(engine.softwareKeyCodes.isEmpty, "Inactive, nothing is taken")
-    print("PASS: posted right modifiers switch on press, held flag stripped from the poster's keys, left side kept, missed release, chosen keys only")
+    print("PASS: posted right modifiers switch on press, held flag stripped from the poster's keys, left side kept, missed release, Synergy's Caps Lock, chosen keys only")
 }
 #endif

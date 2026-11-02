@@ -10,6 +10,11 @@ private struct SideKey {
     let mask: CGEventFlags
     let right: CGEventFlags
     let left: CGEventFlags
+    // Synergy leaves the device bits out while its own Caps Lock is down, which is around every key it types with the lock
+    // on; then the modifier itself, not claimed by the left side, tells it is down.
+    func isDown(_ flags: CGEventFlags) -> Bool {
+        flags.contains(right) || (flags.contains(mask) && !flags.contains(left))
+    }
 }
 private let sideKeys = [
     (sources[0], SideKey(code: 54, mask: .maskCommand, right: CGEventFlags(rawValue: 0x10), left: CGEventFlags(rawValue: 0x08))),
@@ -41,19 +46,19 @@ struct SoftwareKeyGate {
         guard pid != 0 else { return .pass }
         // The held key's release ends what its press began, even if it is no longer chosen. Any poster's: Option input
         // replays a press it queued as this app's own.
-        if let current = held, type == .flagsChanged, code == current.code, let key = Self.side(code), !flags.contains(key.right) {
+        if let current = held, type == .flagsChanged, code == current.code, let key = Self.side(code), !key.isDown(flags) {
             held = nil
             return .release
         }
         if type == .flagsChanged, chosen.contains(code), let key = Self.side(code) {
             // A release whose press came before is the app's, which saw that press.
-            guard flags.contains(key.right) else { return .pass }
+            guard key.isDown(flags) else { return .pass }
             guard held == nil else { return .consume }
             held = (code, pid)
             return .press
         }
         guard let current = held, let key = Self.side(current.code) else { return .pass }
-        if flags.contains(key.right) {
+        if key.isDown(flags) {
             var stripped = flags.subtracting(key.right)
             if !flags.contains(key.left) { stripped.remove(key.mask) }
             return .strip(stripped)
